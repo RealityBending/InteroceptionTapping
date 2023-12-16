@@ -48,6 +48,7 @@ circular_parameters <- function(x){
 
 theme_custom <- list(
   scale_x_continuous(breaks=seq(0, 360, by=90), expand=c(0,0), lim=c(0, 360)),
+  scale_y_continuous(breaks=NULL),
   coord_polar(start = 2*pi),
   theme_bw(),
   theme(
@@ -77,7 +78,14 @@ df <- read.csv("https://raw.githubusercontent.com/RealityBending/PrimalsInteroce
 
 # head(df)
 
+# Cleaning ---------------------------------------------------------------------
+
 df <- filter(df, !is.na(Angle)) # Remove NA values
+
+ggplot(df, aes(x = Tapping_Rate)) +
+  geom_density()
+
+df$Tapping_Rate[df$Tapping_Rate > 600] <- NA
 
 
 # Rate ====================================================================
@@ -110,6 +118,8 @@ df |>
   geom_point() +
   geom_smooth(method="lm", se=FALSE) +
   facet_wrap(~Condition, scales="free")
+model <- glmmTMB::glmmTMB(Tapping_Rate ~ Condition / ECG_Rate + (1 + Condition / ECG_Rate | Participant), data=df)
+summary(model)
 
 dfsub <- df |>
   group_by(Participant, Condition) |>
