@@ -15,6 +15,8 @@ deg2rad <- function(deg) {
 
 circular_parameters <- function(x){
 
+  x <- x[!is.na(x)]  # Remove na
+
   # Density
   c <- circular::circular(x, units = "degrees", rotation="clock")
   D <- data.frame(density(c, bw = 100,
@@ -40,7 +42,8 @@ circular_parameters <- function(x){
 
   # Histogram
   H <- hist(x, plot = FALSE, breaks = seq(0, 360, by=10))
-  H <- data.frame(Count = H$counts / max(H$counts), Angle = H$mids,
+  H <- data.frame(Count = H$counts / max(H$counts),
+                  Angle = H$mids,
                   Width = H$breaks[2] - H$breaks[1])
 
   list(density = D, hist = H, test = test)
@@ -70,17 +73,20 @@ distance_harmonics <- function(x) {
 # Read data ---------------------------------------------------------------
 df <- read.csv("https://raw.githubusercontent.com/RealityBending/PrimalsInteroception/main/data/data_tap.csv") |>
   rename(Participant = participant_id) |>
-  mutate(Angle = abs(Closest_R_Pre) / (abs(Closest_R_Pre) + Closest_R_Post) * 360,
+  mutate(Cardiac_Angle = abs(Closest_R_Pre) / (abs(Closest_R_Pre) + Closest_R_Post) * 360,
+         RSP_Angle = ifelse(RSP_Phase == 1,
+                            abs(Closest_RSP_Trough_Pre) / (abs(Closest_RSP_Trough_Pre) + Closest_RSP_Peak_Post) * 180,
+                            abs(Closest_RSP_Peak_Pre) / (abs(Closest_RSP_Peak_Pre) + Closest_RSP_Trough_Post) * 180 + 180),
          Rate_Ratio = Tapping_Rate / ECG_Rate,
          Rate_Harmonic_Distance = distance_harmonics(Rate_Ratio),
          Condition = fct_relevel(Condition, "Baseline", "Slower", "Faster", "Random", "Heart"))
 
-
+summary(df$RSP_Angle)
 # head(df)
 
 # Cleaning ---------------------------------------------------------------------
 
-df <- filter(df, !is.na(Angle)) # Remove NA values
+df <- filter(df, !is.na(Cardiac_Angle)) # Remove NA values
 
 ggplot(df, aes(x = Tapping_Rate)) +
   geom_density()
@@ -138,7 +144,7 @@ plot(estimate_density(dfsub$Rate_Correlation_Pearson))
 
 
 # Convert control data to circular
-c <- circular::circular(df$Angle, units = "degrees", template ="none", rotation="clock")
+c <- circular::circular(df$Cardiac_Angle, units = "degrees", template ="none", rotation="clock")
 plot(c, stack = TRUE)
 arrows.circular(mean(c)) #add mean to plot
 rayleigh.test(c)
@@ -151,7 +157,106 @@ per_cond <- data.frame()
 for(cond in unique(df$Condition)){
   out <- df |>
     filter(Condition == cond) |>
-    pull(Angle) |>
+    pull(Cardiac_Angle) |>
+    circular_parameters()
+
+  cond_density <- out$density |>
+    mutate(Condition = cond) |>
+    rbind(cond_density)
+
+  cond_hist <- out$hist |>
+    mutate(Condition = cond) |>
+    rbind(cond_hist)
+
+  per_cond <- data.frame(Condition = cond) |>
+    cbind(out$test) |>
+    rbind(per_cond)
+}
+
+ggplot(df, aes(x = Cardiac_Angle)) +
+  geom_bar(data=cond_hist, aes(x=Angle, y=Count, fill=Condition), width=10, stat="identity", color="black") +
+  geom_line(data=cond_density, aes(x=x, y=y), color="black") +
+  facet_wrap(~Condition) +
+  theme_custom
+
+ggplot(per_cond, aes(x=Rayleigh_p, fill=Condition)) +
+  geom_histogram(bins=20, position="dodge") +
+  geom_vline(xintercept = 0.05, linetype="dashed")
+
+# Per Subject -------------------------------------------------------------
+
+
+sub_density <- data.frame()
+per_sub <- data.frame()
+for(sub in unique(df$Participant)){
+  for(cond in unique(filter(df, Participant == sub)$Condition)){
+    out <- df |>
+      filter(Condition == cond, Participant == sub) |>
+      pull(Cardiac_Angle) |>
+      circular_parameters()
+
+    sub_density <- out$density |>
+      mutate(Condition = cond,
+             Participant=sub) |>
+      rbind(sub_density)
+
+    per_sub <- data.frame(Participant = sub,
+                       Condition = cond) |>
+      cbind(out$test) |>
+      rbind(per_sub)
+  }
+}
+
+ggplot(df, aes(x = Cardiac_Angle)) +
+  geom_line(data=sub_density, aes(x=x, y=y, color=Participant)) +
+  facet_wrap(~Condition) +
+  theme_custom
+
+ggplot(per_sub, aes(x=Rayleigh_p, fill=Condition)) +
+  geom_histogram(bins=20, position="dodge") +
+  geom_vline(xintercept = 0.05, linetype="dashed") +
+  facet_wrap(~Condition)
+
+
+# Modelling ---------------------------------------------------------------
+
+# df$Radian <- deg2rad(df$Cardiac_Angle)
+#
+# f <- bf(Radian ~ 0 + Condition,
+#         kappa ~ 0 + Condition,
+#         family = von_mises())
+#
+# model <- brm(
+#   f,
+#   data = df,
+#   # refresh = 0,
+#   iter = 1000)
+
+
+
+
+# Respiratory Cycle ===========================================================
+
+# Global ------------------------------------------------------------------
+
+
+# Convert control data to circular
+c <- circular::circular(df$RSP_Angle, units = "degrees", template ="none", rotation="clock")
+plot(c, stack = TRUE)
+arrows.circular(mean(c)) #add mean to plot
+rayleigh.test(c)
+
+# Per Condition -----------------------------------------------------------
+mean(abs(df$Closest_RSP_Trough_Pre) + abs(df$Closest_RSP_Peak_Post), na.rm=TRUE)
+mean(abs(df$Closest_RSP_Peak_Pre) + abs(df$Closest_RSP_Trough_Post), na.rm=TRUE)
+
+cond_density <- data.frame()
+cond_hist <- data.frame()
+per_cond <- data.frame()
+for(cond in unique(df$Condition)){
+  out <- df |>
+    filter(Condition == cond) |>
+    pull(RSP_Angle) |>
     circular_parameters()
 
   cond_density <- out$density |>
@@ -176,53 +281,3 @@ ggplot(df, aes(x = Angle)) +
 ggplot(per_cond, aes(x=Rayleigh_p, fill=Condition)) +
   geom_histogram(bins=20, position="dodge") +
   geom_vline(xintercept = 0.05, linetype="dashed")
-
-# Per Subject -------------------------------------------------------------
-
-
-sub_density <- data.frame()
-per_sub <- data.frame()
-for(sub in unique(df$Participant)){
-  for(cond in unique(filter(df, Participant == sub)$Condition)){
-    out <- df |>
-      filter(Condition == cond, Participant == sub) |>
-      pull(Angle) |>
-      circular_parameters()
-
-    sub_density <- out$density |>
-      mutate(Condition = cond,
-             Participant=sub) |>
-      rbind(sub_density)
-
-    per_sub <- data.frame(Participant = sub,
-                       Condition = cond) |>
-      cbind(out$test) |>
-      rbind(per_sub)
-  }
-}
-
-ggplot(df, aes(x = Angle)) +
-  geom_line(data=sub_density, aes(x=x, y=y, color=Participant)) +
-  facet_wrap(~Condition) +
-  theme_custom
-
-ggplot(per_sub, aes(x=Rayleigh_p, fill=Condition)) +
-  geom_histogram(bins=20, position="dodge") +
-  geom_vline(xintercept = 0.05, linetype="dashed") +
-  facet_wrap(~Condition)
-
-
-# Modelling ---------------------------------------------------------------
-
-# df$Radian <- deg2rad(df$Angle)
-#
-# f <- bf(Radian ~ 0 + Condition,
-#         kappa ~ 0 + Condition,
-#         family = von_mises())
-#
-# model <- brm(
-#   f,
-#   data = df,
-#   # refresh = 0,
-#   iter = 1000)
-
