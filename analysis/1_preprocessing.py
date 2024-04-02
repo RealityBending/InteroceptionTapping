@@ -19,7 +19,7 @@ def qc_physio(df, info, sub, plot_ecg=[], plot_ppg=[]):
     nk.ecg_plot(df, info)  # Save ECG plot
     fig = plt.gcf()
     img = ill.image_text(
-        sub, color="black", size=100, x=-0.82, y=0.90, image=ill.fig2img(fig)
+        sub, color="black", size=100, x=-0.82, y=0.90, image=nk.fig2img(fig)
     )
     plt.close(fig)  # Do not show the plot in the console
     plot_ecg.append(img)
@@ -62,8 +62,28 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
     # plt.vlines(tap_beh["Tapping_Times"].values + onsets_photo[0], 1, 2, color="red")
     if sub in ["sub-01", "sub-17", "sub-22", "sub-26"]:
         onsets_photo = onsets_photo[1::]
+    if sub in ["sub-42"]:
+        onsets_photo = onsets_photo[1::]
+        onsets_photo2 = np.insert(
+            onsets_photo, 319, onsets_photo[0] + tap_beh["Tapping_Times"].values[319]
+        )
+        onsets_photo2 = np.insert(
+            onsets_photo2, 353, onsets_photo[0] + tap_beh["Tapping_Times"].values[353]
+        )
+        onsets_photo2 = np.insert(
+            onsets_photo2, 370, onsets_photo[0] + tap_beh["Tapping_Times"].values[370]
+        )
+        # plt.vlines(onsets_photo[0:420], 0, 1, color="blue")
+        # plt.vlines(onsets_photo2[0:420], 0.5, 1, color="green")
+        # plt.vlines(
+        #     tap_beh["Tapping_Times"].values[0:420] + onsets_photo[0],
+        #     1,
+        #     2,
+        #     color="red",
+        # )
+        onsets_photo = onsets_photo2
 
-    if len(onsets_photo) != 420:
+    if len(onsets_photo) != 420 and sub not in ["sub-01", "sub-02"]:
         print(f"    - WARNING: Number of events is not 420 ({len(onsets_photo)})")
 
     # Correct for delay between photo and behavioral data

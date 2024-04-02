@@ -71,7 +71,7 @@ distance_harmonics <- function(x) {
 }
 
 # Read data ---------------------------------------------------------------
-df <- read.csv("https://raw.githubusercontent.com/RealityBending/PrimalsInteroception/main/data/data_tap.csv") |>
+df <- read.csv("../data/data_tap.csv") |>
   rename(Participant = participant_id) |>
   mutate(Cardiac_Angle = abs(Closest_R_Pre) / (abs(Closest_R_Pre) + Closest_R_Post) * 360,
          RSP_Angle = ifelse(RSP_Phase == 1,
@@ -174,7 +174,7 @@ for(cond in unique(df$Condition)){
 }
 
 ggplot(df, aes(x = Cardiac_Angle)) +
-  geom_bar(data=cond_hist, aes(x=Angle, y=Count, fill=Condition), width=10, stat="identity", color="black") +
+  geom_bar(data=cond_hist, aes(x=Angle, y=Count, fill=Condition), width=5, stat="identity", color="black") +
   geom_line(data=cond_density, aes(x=x, y=y), color="black") +
   facet_wrap(~Condition) +
   theme_custom
