@@ -1,0 +1,139 @@
+---
+title: "Cleaning"
+editor: source
+editor_options: 
+  chunk_output_type: console
+format:
+  html:
+    code-fold: true
+    self-contained: false
+---
+
+## Data Preparation
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(easystats)
+```
+
+
+```{r}
+#| code-fold: false
+
+deg2rad <- function(deg) {
+  z_deg <- deg %% 360
+  z_deg[!is.na(z_deg) & z_deg > 180] <- z_deg[!is.na(z_deg) & z_deg > 180] - 360
+  z_deg * (pi / 180)
+}
+
+distance_harmonics <- function(x) {
+  # powers of 2 (2^-2, 2^-1, ...)
+  freqs <- c(0.25, 0.5, 1, 2, 4, 8, 16)
+  closest <- freqs[sapply(x, \(v) which.min(abs(freqs - v)))]
+  closest - x
+}
+
+df <- read.csv("../data/rawdata_tap.csv") |>
+  rename(Participant = participant_id) |>
+  mutate(Cardiac_Angle = abs(Closest_R_Pre) / (abs(Closest_R_Pre) + Closest_R_Post) * 360,
+         Cardiac_Radian = deg2rad(Cardiac_Angle),
+         RSP_Angle = ifelse(RSP_Phase == 1,
+                            abs(Closest_RSP_Trough_Pre) / (abs(Closest_RSP_Trough_Pre) + Closest_RSP_Peak_Post) * 180,
+                            abs(Closest_RSP_Peak_Pre) / (abs(Closest_RSP_Peak_Pre) + Closest_RSP_Trough_Post) * 180 + 180),
+         Rate_Ratio = Tapping_Rate / ECG_Rate,
+         Rate_Diff = abs(Tapping_Rate - ECG_Rate),
+         Rate_Harmonic_Distance = distance_harmonics(Rate_Ratio),
+         Condition = fct_relevel(Condition, "Baseline", "Slower", "Faster", "Random", "Heart")) |> 
+  filter(!is.na(Cardiac_Angle)) 
+```
+
+
+## Exclusion
+
+### Consecutive Taps
+
+```{r}
+# Probability of consecutive taps being in the same cycle
+cycle_duration_ms <- 60 * 1000 / mean(df$ECG_Rate, na.rm=T)
+delays <- seq(0.1, 500, length.out=100)
+prob <- (cycle_duration_ms - delays) / cycle_duration_ms
+
+data.frame(TAP_Delay=delays, p=prob) |> 
+  ggplot(aes(x=TAP_Delay, y=p)) +
+  geom_line() +
+  geom_vline(xintercept=380, color="red", linetype="dotted", linewidth=1) +
+  geom_hline(yintercept=0.5, color="red", linetype="dotted", linewidth=1) +
+  theme_minimal() +
+  ggtitle("Probability of consecutive taps being in the same cycle")
+```
+
+
+
+```{r}
+#| code-fold: false
+
+exclude <- df |> 
+  mutate(Delay = c(NA, diff(Tapping_Times)), .by=c("Participant", "Condition")) |> 
+  mutate(Exclude = ifelse(Delay < 380, TRUE, FALSE),
+         Exclude = ifelse(is.na(Exclude), FALSE, Exclude))
+
+exclude |> 
+  filter(!is.na(Delay)) |> 
+  # filter(Exclude == FALSE) |> 
+  ggplot(aes(x=Delay, color=Participant)) +
+  geom_density(alpha=0.5) +
+  geom_vline(xintercept=380, linetype="dotted") +
+  facet_wrap(~Condition) +
+  scale_x_log10() +
+  scale_color_discrete(guide="none") +
+  theme_minimal()
+```
+
+Excluded `r insight::format_percent(sum(exclude[!is.na(exclude$Delay),]$Exclude) / nrow(df), digits=3)` observations.
+
+```{r}
+df <- df[exclude$Exclude == FALSE & df$Condition != "Faster", ]
+```
+
+We also removed the **Faster** condition due to the high number of dropped observations.
+
+### Average Rythm
+
+```{r}
+#| code-fold: false
+
+df |> 
+  ggplot(aes(x=Trial_Order, y=Tapping_Rate))  +
+  geom_line(aes(color=Condition)) +
+  facet_wrap(~Participant)
+
+df |> 
+  summarize(Rate_Median = median(Tapping_Rate), 
+            Rate_SD = sd(Tapping_Rate), 
+            .by=c("Participant", "Condition")) |> 
+  mutate(Participant = fct_reorder(Participant, Rate_Median)) |> 
+  arrange(Participant) |> 
+  pivot_longer(-c("Participant", "Condition")) |> 
+  ggplot(aes(x=Participant, y=value)) + 
+  geom_bar(aes(fill=Condition), stat = "identity") +
+  facet_wrap(Condition ~ name, scales="free_y") +
+  theme(axis.text.x = element_blank())
+```
+
+
+```{r}
+#| code-fold: false
+
+plot(estimate_density(df$Cardiac_Radian))
+summary(df$Cardiac_Radian)
+```
+
+## Final Sample
+
+```{r}
+# Save cleaned data
+write.csv(df, "../data/data_tap.csv")
+```

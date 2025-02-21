@@ -1,0 +1,170 @@
+---
+title: "Cleaning"
+editor: source
+editor_options: 
+  chunk_output_type: console
+format:
+  html:
+    code-fold: true
+    self-contained: false
+---
+
+## Data Preparation
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(easystats)
+library(circular)
+library(glmmTMB)
+```
+
+
+```{r}
+#| code-fold: false
+
+df <- read.csv("../data/data_tap.csv")
+
+dfsub <- read.csv("https://raw.githubusercontent.com/RealityBending/InteroceptionPrimals/main/data/data_participants.csv") |>
+  rename(Participant="participant_id") |>
+  select(-matches("\\d")) |>
+  filter(Participant %in% unique(df$Participant)) |>
+  arrange(as.character(Participant)) 
+```
+
+## Features Extraction
+
+```{r}
+circular_parameters <- function(x){
+  # Density
+  c <- circular::circular(x, units = "degrees", rotation="clock")
+
+  # plot(density(c, bw = 360, kernel="vonmises"), zero.line = TRUE, points.plot=TRUE)
+  # arrows.circular(mean(c))
+
+  # Uniformity (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7373216/)
+  test <- circular::rayleigh.test(c)
+  params <- data.frame(
+    # Rayleigh = test$statistic,  # Same as strength
+    Rayleigh_p = test$p.value,
+    Kuiper = circular::kuiper.test(c, alpha=0.05)$statistic,
+    Watson = circular::watson.test(c, alpha=0.05)$statistic,
+    # RaoSpacing = circular::rao.spacing.test(c, alpha=0.05)$statistic,
+    # Angular mean and length (strength)
+    Orientation = as.numeric(mean(c)),
+    Strength = as.numeric(rho.circular(c))
+  )
+
+  params
+}
+
+
+dflong <- data.frame()
+for(ppt in unique(df$Participant)) {
+  for(cond in unique(df$Condition)) {
+    dat <- filter(df, Participant==ppt, Condition==cond)
+    if(nrow(dat)==0) next
+    params <- circular_parameters(dat$Cardiac_Angle)
+    params$RateRatio <- mean(dat$Rate_Ratio, na.rm=TRUE)
+    params$RateDiff <- mean(dat$Rate_Diff, na.rm=TRUE)
+    params$RateHarmonics <- mean(dat$Rate_Harmonic_Distance, na.rm=TRUE)
+    params$Participant <- ppt
+    params$Condition <- cond
+    dflong <- rbind(dflong, params)
+  }
+}
+```
+
+```{r}
+dflong |> 
+  pivot_longer(-c(Participant, Condition)) |> 
+  ggplot(aes(x=value, fill=Condition)) +
+  geom_histogram(position="identity", alpha=0.5) +
+  facet_wrap(~name, scales="free", ncol=4)
+
+# Outliers
+dflong$Strength[dflong$Strength > 0.75] <- NA
+dflong$Watson[dflong$Watson > 0.75] <- NA
+```
+
+## Conditions
+
+```{r}
+correlation::correlation(dflong) |> 
+  summary(redundant=TRUE) |> 
+  plot()
+```
+
+
+```{r}
+data_means <- data.frame()
+for(feature in names(select(dflong, -Participant, -Condition))) {
+  if(feature %in% c("Rayleigh_p", "Strength", "Watson")) {
+    family <- "ordbeta"
+  } else {
+    family <- "gaussian"
+  }
+  m <- glmmTMB::glmmTMB(as.formula(paste(feature, "~ Condition")), data=dflong, family=family)
+  data_means <- rbind(data_means,
+                      mutate(estimate_means(m, by="Condition"), Feature=feature))
+  
+}
+
+
+# estimate_contrasts(m, contrast = "Condition")
+
+
+data_means |>
+  ggplot(aes(x=Condition, y=Mean)) +
+  geom_line(aes(group=1)) +
+  geom_pointrange(aes(ymin=CI_low, ymax=CI_high)) +
+  facet_wrap(~Feature, scales="free")
+```
+
+## Correlations
+
+```{r}
+select(dflong, -Participant, -Condition) |> 
+  parameters::n_factors() |> 
+  plot()
+
+factor_analysis(select(dflong, -Participant, -Condition), n=4, rotation="varimax") |> 
+  plot()
+```
+
+```{r}
+dffeat <- dflong |>
+  select(-Kuiper, -Orientation, -Rayleigh_p, -RateRatio, -RateHarmonics) |>
+  pivot_wider(names_from="Condition",
+              values_from=-Participant) |>
+  datawizard::data_addprefix("TAP_", exclude="Participant")
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+
+dfall <- merge(dfsub, dffeat, by="Participant")
+
+plot_cor <- function(df1, df2=NULL) {
+  correlation::correlation(data=df1,
+                           data2=df2,
+                           p_adjust="none") |>
+    summary(redundant=TRUE) |>
+    correlation::cor_sort() |>
+    plot() +
+    theme(axis.text.x=element_text(angle=45, hjust=1))
+}
+
+plot_cor(select(dfall, starts_with("TAP")))
+
+plot_cor(select(dfall, matches("HCT_")),
+         select(dfall, starts_with("TAP")))
+plot_cor(select(dfall, matches("MAIA|IAS")),
+         select(dfall, starts_with("TAP")))
+plot_cor(select(dfall, matches("HRV")),
+         select(dfall, starts_with("TAP")))
+```

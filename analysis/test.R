@@ -220,20 +220,31 @@ ggplot(per_sub, aes(x=Rayleigh_p, fill=Condition)) +
 
 # Modelling ---------------------------------------------------------------
 
-# df$Radian <- deg2rad(df$Cardiac_Angle)
-#
-# f <- bf(Radian ~ 0 + Condition,
-#         kappa ~ 0 + Condition,
-#         family = von_mises())
-#
-# model <- brm(
-#   f,
-#   data = df,
-#   # refresh = 0,
-#   iter = 1000)
+df$Cardiac_Radian <- deg2rad(df$Cardiac_Angle)
+plot(estimate_density(df$Cardiac_Radian))
 
+options(mc.cores = parallel::detectCores())
 
+f <- bf(Cardiac_Radian ~ 0 + Intercept + Condition + (Condition | Participant),
+        kappa ~ 0 + Intercept + Condition,
+        family = von_mises())
 
+model <- brm(
+  f,
+  data = df,
+  # refresh = 0,
+  iter = 2000,
+  chains = 4,
+  cores = 4,
+  num_paths=8,
+  single_path_draws=2000,
+  algorithm="pathfinder",
+  backend="cmdstanr")
+
+parameters::parameters(model)
+estimate_contrasts(model)
+
+estimate_relation(model)
 
 # Respiratory Cycle ===========================================================
 

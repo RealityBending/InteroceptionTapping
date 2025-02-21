@@ -14,15 +14,18 @@ import scipy.stats
 mne.set_log_level(verbose="WARNING")
 
 
-def qc_physio(df, info, sub, plot_ecg=[], plot_ppg=[]):
-    # ECG
-    nk.ecg_plot(df, info)  # Save ECG plot
+def qc_physio(df, info, sub, plot_ecg=[]):
+    # Save ECG plot
+    nk.ecg_plot(df, info)
     fig = plt.gcf()
-    img = ill.image_text(
-        sub, color="black", size=100, x=-0.82, y=0.90, image=nk.fig2img(fig)
-    )
+    fig.suptitle(f"{sub}")
+
+    # Remove legend and resize
+    [ax.legend().set_visible(False) for ax in fig.axes]
+    fig.set_size_inches(fig.get_size_inches() * 0.3)
+
     plt.close(fig)  # Do not show the plot in the console
-    plot_ecg.append(img)
+    plot_ecg.append(nk.fig2img(fig))
 
     return plot_ecg
 
@@ -30,7 +33,11 @@ def qc_physio(df, info, sub, plot_ecg=[], plot_ppg=[]):
 # Processing =================================================================================
 
 
-def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
+def process_tap(sub, qc_tap_ecg=[]):
+    # Path to EEG data
+    path_eeg = path + sub + "/eeg/"
+    path_beh = path + sub + "/beh/"
+
     # Open TAP file
     file = [file for file in os.listdir(path_eeg) if "TAP" in file]
     file = path_eeg + [f for f in file if ".vhdr" in f][0]
@@ -41,9 +48,25 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
     file = path_beh + [f for f in file if ".tsv" in f][0]
     tap_beh = pd.read_csv(file, sep="\t")
 
+    if sub in ["sub-57"]:
+        # LUX was not facing screen initially, was corrected after first (medium pace) TAP
+        tap = tap.crop(tmin=100)
+    if sub in ["sub-80"]:
+        tap = tap.crop(tmin=220)
+    if sub in ["sub-91"]:
+        # lux fell off during the first trial of TAP
+        tap = tap.crop(tmin=110)
+    if sub in ["sub-93"]:
+        # LUX was not plugged in for first TAP trial but fixed this before the second trial started
+        tap = tap.crop(tmin=100)
+
+    photo = tap["PHOTO"][0][0]  # nk.signal_plot(photo[0:10000])
+    if sub in ["sub-76"]:
+        photo[photo > 5] = 5  # Odd peak
+
     # Find events and crop just before (1 second +/-) first and after last
     events = nk.events_find(
-        tap["PHOTO"][0][0],
+        photo,
         threshold_keep="below",
         duration_min=50,
         duration_max=500,
@@ -58,9 +81,26 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
         onsets_photo = onsets_photo[1::]
 
     # Manual fix
-    # plt.vlines(onsets_photo, 0, 1, color="blue")
-    # plt.vlines(tap_beh["Tapping_Times"].values + onsets_photo[0], 1, 2, color="red")
-    if sub in ["sub-01", "sub-17", "sub-22", "sub-26"]:
+    if sub in [
+        "sub-01",
+        "sub-17",
+        "sub-22",
+        "sub-26",
+        "sub-44",
+        "sub-59",
+        "sub-64",
+        "sub-65",
+        "sub-94",
+        "sub-99",
+        "sub-100",
+        "sub-101",
+        "sub-104",
+        "sub-105",
+        "sub-108",
+        "sub-112",
+        "sub-113",
+        "sub-115",
+    ]:
         onsets_photo = onsets_photo[1::]
     if sub in ["sub-42"]:
         onsets_photo = onsets_photo[1::]
@@ -82,9 +122,76 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
         #     color="red",
         # )
         onsets_photo = onsets_photo2
+    if sub in ["sub-98"]:
+        onsets_photo = np.insert(
+            onsets_photo, 166, onsets_photo[0] + tap_beh["Tapping_Times"].values[166]
+        )
+    if sub in ["sub-99"]:
+        tap_beh = tap_beh.loc[2::]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+    if sub in ["sub-48"]:  # Participant started tapping before the first photo
+        tap_beh = tap_beh[tap_beh["Condition"] != "Baseline"]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+        onsets_photo = onsets_photo[9::]
+    if sub in ["sub-57"]:
+        tap_beh = tap_beh[tap_beh["Condition"] != "Baseline"]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+        onsets_photo = onsets_photo[1::]
+    if sub in ["sub-80"]:
+        tap_beh = tap_beh[tap_beh["Condition"] != "Baseline"]
+        tap_beh = tap_beh[tap_beh["Condition"] != "Slower"]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+        onsets_photo = onsets_photo[75::]
+    if sub in ["sub-91"]:
+        tap_beh = tap_beh[tap_beh["Condition"] != "Baseline"]
+        tap_beh = tap_beh[tap_beh["Condition"] != "Slower"]
+        tap_beh = tap_beh[tap_beh["Condition"] != "Faster"]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+        onsets_photo = onsets_photo[112::]
+    if sub in ["sub-93"]:
+        tap_beh = tap_beh[tap_beh["Condition"] != "Baseline"]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"].values - tap_beh["Tapping_Times"].values[0]
+        )
+    if sub in ["sub-109"]:
+        tap_beh = tap_beh.loc[1::]
+        tap_beh["Tapping_Times"] = (
+            tap_beh["Tapping_Times"] - tap_beh["Tapping_Times"].min()
+        )
+    if sub in ["sub-110"]:
+        onsets_photo = onsets_photo[1::]
+        tap_beh = tap_beh.loc[5::]
+        tap_beh["Tapping_Times"] = tap_beh["Tapping_Times"] - (
+            tap_beh["Tapping_Times"].min() - onsets_photo[0]
+        )
 
-    if len(onsets_photo) != 420 and sub not in ["sub-01", "sub-02"]:
-        print(f"    - WARNING: Number of events is not 420 ({len(onsets_photo)})")
+    if len(onsets_photo) != 420 and sub not in [
+        "sub-01",
+        "sub-02",
+        "sub-48",
+        "sub-57",
+        "sub-80",
+        "sub-91",
+        "sub-93",
+        "sub-99",
+        "sub-109",  # Recording started late (less trials in photo)
+        "sub-110",  # Recording started late (less trials in photo)
+    ]:
+        plt.vlines(onsets_photo, 0, 1, color="blue")
+        plt.vlines(tap_beh["Tapping_Times"].values + onsets_photo[0], 1, 2, color="red")
+        raise ValueError(
+            f"    - WARNING: Number of events is not 420 ({len(onsets_photo)})"
+        )
 
     # Correct for delay between photo and behavioral data
     onsets_beh = tap_beh["Tapping_Times"].values + onsets_photo[0]
@@ -95,7 +202,9 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
         print(f"    - WARNING: Correlation between photo and beh onsets is low.")
 
     # Preprocess physio
-    bio = tap.to_data_frame().bfill()  # Backfill missing values at the beginning
+    bio = (
+        tap.to_data_frame().bfill().ffill()
+    )  # Backfill missing values at the beginning
     bio, info = nk.bio_process(
         ecg=bio["ECG"].values,
         rsp=bio["RSP"].values,
@@ -103,7 +212,7 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
     )
 
     # QC
-    qc_tap_ecg = qc_physio(bio, info, sub, plot_ecg=qc_tap_ecg, plot_ppg=None)
+    qc_tap_ecg = qc_physio(bio, info, sub, plot_ecg=qc_tap_ecg)
 
     # Epoch around each tap
     epochs = nk.epochs_create(
@@ -177,15 +286,17 @@ def process_tap(sub, path_eeg, path_beh, qc_tap_ecg=[]):
         tap_beh.loc[tap_beh["Condition"] == cond, "Tapping_Rate"] = rate
 
     # Merge with behavioral data
-    dat = pd.concat([tap_beh, dat.reset_index(drop=True)], axis=1)
+    dat = pd.concat(
+        [tap_beh.reset_index(drop=True), dat.reset_index(drop=True)], axis=1
+    )
     return dat, qc_tap_ecg
 
 
 # Variables ==================================================================================
 # Change the path to your local data folder.
 # The data can be downloaded from OpenNeuro (TODO).
-path = "C:/Users/domma/Box/Data/PrimalsInteroception/Reality Bending Lab - PrimalsInteroception/"
-# path = "C:/Users/dmm56/Box/Data/PrimalsInteroception/Reality Bending Lab - PrimalsInteroception/"
+path = "C:/Users/domma/Box/Data/InteroceptionPrimals/Reality Bending Lab - InteroceptionPrimals/"
+# path = "C:/Users/dmm56/Box/Data/InteroceptionPrimals/Reality Bending Lab - InteroceptionPrimals/"
 
 # Get participant list
 meta = pd.read_csv(path + "participants.tsv", sep="\t")
@@ -196,16 +307,16 @@ df_tap = pd.DataFrame()
 
 qc_tap_ecg = []
 
-# sub = "sub-19"
+# sub = "sub-50"
 # Loop through participants ==================================================================
-for sub in meta["participant_id"].values[0::]:
+for i, sub in enumerate(meta["participant_id"].values):
+
+    # if i < 22:
+    #     continue
+
     # Print progress and comments
     print(sub)
     print("  * " + meta[meta["participant_id"] == sub]["Comments"].values[0])
-
-    # Path to EEG data
-    path_eeg = path + sub + "/eeg/"
-    path_beh = path + sub + "/beh/"
 
     # Tapping Task ===========================================================================
     print("  - TAP - Preprocessing")
@@ -214,13 +325,21 @@ for sub in meta["participant_id"].values[0::]:
         print("    - WARNING: Skipping TAP for this participant (No ECG).")
     elif sub in ["sub-31"]:
         print("    - WARNING: Skipping TAP for this participant (ECG electrode fell).")
+    elif sub in ["sub-49", "sub-55"]:
+        print(
+            "    - WARNING: Skipping TAP for this participant (no photosensor - unclear why)."
+        )
+    elif sub in ["sub-68", "sub-72", "sub-75"]:
+        print("    - WARNING: Skipping TAP for this participant (technical issues).")
+    elif sub in ["sub-114"]:
+        print("    - WARNING: Skipping TAP for this participant (technical issues).")
     else:
-        tap, qc_tap_ecg = process_tap(sub, path_eeg, path_beh, qc_tap_ecg)
+        tap, qc_tap_ecg = process_tap(sub, qc_tap_ecg)
         df_tap = pd.concat([df_tap, tap], axis=0)
 
 
 # # Clean up and Save data
-df_tap.to_csv("../data/data_tap.csv", index=False)
+df_tap.to_csv("../data/rawdata_tap.csv", index=False)
 
 # Save figures
 ill.image_mosaic(qc_tap_ecg, ncols=4, nrows="auto").save(
